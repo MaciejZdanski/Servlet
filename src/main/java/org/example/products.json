@@ -1,0 +1,21 @@
+[
+  {
+    "productId": 1,
+    "productName": "Ultra HD TV",
+    "productDescription": "A 55-inch Ultra HD television with smart features and HDR support.",
+    "productPrice": 1200.00
+  },
+  {
+    "productId": 2,
+    "productName": "Bluetooth Headphones",
+    "productDescription": "Noise-cancelling over-ear headphones with 20-hour battery life.",
+    "productPrice": 150.99
+  },
+  {
+    "productId": 3,
+    "productName": "Espresso Machine",
+    "productDescription": "Compact espresso machine with built-in steamer for cappuccinos.",
+    "productPrice": 399.95
+  }
+
+]
