@@ -1,88 +1,198 @@
-package org.example.Servlets;
+package org.example.servlets;
 
 import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.annotation.WebServlet;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.util.DatabaseUtils;
+
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.sql.*;
 
 @WebServlet(name = "ProductServlet", urlPatterns = {"/product"})
 public class ProductServlet extends HttpServlet {
 
-    private static final String JSON_FILE_PATH = "src\\main\\java\\org\\example\\products.json";
-    private ObjectMapper objectMapper = new ObjectMapper();
-    @Override
-    protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        // Read and return products from JSON
-        List<Product> products = readProductsFromFile();
-        sendJsonResponse(response, products);
-    }
 
-    @Override
     protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        // Add a new product to JSON
-        Product product = objectMapper.readValue(request.getInputStream(), Product.class);
-        List<Product> products = readProductsFromFile();
-        products.add(product);
-        writeProductsToFile(products);
-        sendJsonResponse(response, product);
-    }
+        String action = request.getParameter("action");
+        Connection connection = null;
+        response.setHeader("Access-Control-Allow-Origin", "*");
+        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE");
+        response.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-    @Override
-    protected void doPut(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        // Update an existing product in JSON
-        Product updatedProduct = objectMapper.readValue(request.getInputStream(), Product.class);
-        List<Product> products = readProductsFromFile();
-        updateProductInList(products, updatedProduct);
-        writeProductsToFile(products);
-        sendJsonResponse(response, updatedProduct);
-    }
+        if ("remove".equals(action)) {
+            int productIdToRemove = Integer.parseInt(request.getParameter("productId"));
 
-    @Override
-    protected void doDelete(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        // Delete a product from JSON
-        String productId = request.getParameter("productId");
-        List<Product> products = readProductsFromFile();
-        deleteProductFromList(products, productId);
-        writeProductsToFile(products);
-        response.getWriter().write("Product deleted successfully");
-    }
+            try {
+                connection = DatabaseUtils.getConnection();
+                removeProduct(connection, productIdToRemove);
+                response.sendRedirect(request.getContextPath() + "/product");
+            } catch (SQLException e) {
+                handleDatabaseError(e, response);
+            } finally {
+                closeConnection(connection);
+            }
+        } else if ("update".equals(action)) {
+            int productIdToUpdate = Integer.parseInt(request.getParameter("productId"));
+            String updatedName = request.getParameter("updatedName");
+            String updatedDescription = request.getParameter("updatedDescription");
 
-    private List<Product> readProductsFromFile() throws IOException {
-        // Read the JSON file and return the list of products
-        File file = new File(JSON_FILE_PATH);
-        if (file.exists()) {
-            return Arrays.asList(objectMapper.readValue(file, Product[].class));
+            try {
+                connection = DatabaseUtils.getConnection();
+                updateProduct(connection, productIdToUpdate, updatedName, updatedDescription);
+                response.sendRedirect(request.getContextPath() + "/product");
+            } catch (SQLException e) {
+                handleDatabaseError(e, response);
+            } finally {
+                closeConnection(connection);
+            }
         } else {
-            return new ArrayList<>();
-        }
-    }
+            String productName = request.getParameter("productName");
+            String productDescription = request.getParameter("productDescription");
+            String productPrice = request.getParameter("productPrice");
 
-    private void writeProductsToFile(List<Product> products) throws IOException {
-        // Write the updated list of products to the JSON file
-        objectMapper.writeValue(new File(JSON_FILE_PATH), products);
-    }
-
-    private void updateProductInList(List<Product> products, Product updatedProduct) {
-        // Find and update the product in the list
-        for (int i = 0; i < products.size(); i++) {
-            if (products.get(i).getProductId() == updatedProduct.getProductId()) {
-                products.set(i, updatedProduct);
-                break;
+            try {
+                connection = DatabaseUtils.getConnection();
+                addProduct(connection, productName, productDescription, productPrice);
+            } catch (SQLException e) {
+                handleDatabaseError(e, response);
+            } finally {
+                closeConnection(connection);
             }
         }
     }
 
-    private void deleteProductFromList(List<Product> products, String productId) {
-        // Remove the product from the list
-        products.removeIf(p -> p.getProductId() == Integer.parseInt(productId));
+    protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+        response.setHeader("Access-Control-Allow-Origin", "*");
+        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE");
+        response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+        try (Connection connection = DatabaseUtils.getConnection()) {
+            String productName = request.getParameter("product_name");
+            if (productName != null && !productName.isEmpty()) {
+                retrieveProductByName(connection, productName, response);
+                return;
+            }
+
+            String productIdParam = request.getParameter("product_id");
+            if (productIdParam != null && !productIdParam.isEmpty()) {
+                int productId = Integer.parseInt(productIdParam);
+                retrieveProductById(connection, productId, response);
+                return;
+            }
+
+            retrieveAllProducts(connection, response);
+        } catch (SQLException | NumberFormatException e) {
+            handleDatabaseError(e, response);
+        }
     }
 
-    private void sendJsonResponse(HttpServletResponse response, Object object) throws IOException {
-        // Send a JSON response
-        response.setContentType("application/json");
-        response.getWriter().write(objectMapper.writeValueAsString(object));
+    private void retrieveProductByName(Connection connection, String productName, HttpServletResponse response) throws SQLException, IOException {
+        String sql = "SELECT * FROM products WHERE product_name = ?";
+        try (PreparedStatement preparedStatement = connection.prepareStatement(sql)) {
+            preparedStatement.setString(1, productName);
+
+            try (ResultSet resultSet = preparedStatement.executeQuery()) {
+                processProductResultSet(resultSet, response);
+            }
+        }
+    }
+
+    private void removeProduct(Connection connection, int productId) throws SQLException {
+        String sql = "DELETE FROM products WHERE product_id = ?";
+        try (PreparedStatement preparedStatement = connection.prepareStatement(sql)) {
+            preparedStatement.setInt(1, productId);
+            preparedStatement.executeUpdate();
+        }
+    }
+
+    private void retrieveProductById(Connection connection, int productId, HttpServletResponse response) throws SQLException, IOException {
+        String sql = "SELECT * FROM products WHERE product_id = ?";
+        try (PreparedStatement preparedStatement = connection.prepareStatement(sql)) {
+            preparedStatement.setInt(1, productId);
+
+            try (ResultSet resultSet = preparedStatement.executeQuery()) {
+                processProductResultSet(resultSet, response);
+            }
+        }
+    }
+
+    private void updateProduct(Connection connection, int productId, String updatedName, String updatedDescription) throws SQLException {
+        String sql = "UPDATE products SET product_name = ?, product_description = ? WHERE product_id = ?";
+        try (PreparedStatement preparedStatement = connection.prepareStatement(sql)) {
+            preparedStatement.setString(1, updatedName);
+            preparedStatement.setString(2, updatedDescription);
+            preparedStatement.setInt(3, productId);
+            preparedStatement.executeUpdate();
+        }
+    }
+
+    private void handleDatabaseError(Exception e, HttpServletResponse response) throws IOException {
+        e.printStackTrace();
+        response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Database error: " + e.getMessage());
+    }
+
+    private void closeConnection(Connection connection) {
+        if (connection != null) {
+            try {
+                connection.close();
+            } catch (SQLException ignored) {
+            }
+        }
+    }
+
+    private void addProduct(Connection connection, String productName, String productDescription, String productPrice) throws SQLException {
+        String sql = "INSERT INTO products (product_name, product_description, product_price) VALUES (?, ?, ?)";
+        try (PreparedStatement preparedStatement = connection.prepareStatement(sql)) {
+            preparedStatement.setString(1, productName);
+            preparedStatement.setString(2, productDescription);
+            preparedStatement.setDouble(3, Double.parseDouble(productPrice));
+            preparedStatement.executeUpdate();
+        }
+    }
+
+    private void processProductResultSet(ResultSet resultSet, HttpServletResponse response) throws SQLException, IOException {
+        PrintWriter out = response.getWriter();
+        out.println("<html><body>");
+        out.println("<h1>Product Details</h1>");
+
+        while (resultSet.next()) {
+            int productId = resultSet.getInt("product_id");
+            String productName = resultSet.getString("product_name");
+            String productDescription = resultSet.getString("product_description");
+
+            out.println("<p>Product ID: " + productId + "</p>");
+            out.println("<p>Name: " + productName + "</p>");
+            out.println("<p>Description: " + productDescription + "</p>");
+            out.println("<hr>");
+        }
+
+        out.println("</body></html>");
+    }
+
+    private void retrieveAllProducts(Connection connection, HttpServletResponse response) throws SQLException, IOException {
+        String sql = "SELECT * FROM products";
+        try (PreparedStatement preparedStatement = connection.prepareStatement(sql);
+             ResultSet resultSet = preparedStatement.executeQuery()) {
+
+            PrintWriter out = response.getWriter();
+            out.println("<html><body>");
+            out.println("<h1>Product Details</h1>");
+
+            while (resultSet.next()) {
+                int productId = resultSet.getInt("product_id");
+                String productName = resultSet.getString("product_name");
+                String productDescription = resultSet.getString("product_description");
+
+                out.println("<p>Product ID: " + productId + "</p>");
+                out.println("<p>Name: " + productName + "</p>");
+                out.println("<p>Description: " + productDescription + "</p>");
+                out.println("<hr>");
+            }
+
+            out.println("</body></html>");
+        }
     }
 }
